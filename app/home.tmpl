@@ -1,5 +1,4 @@
 {{ $home_container := where $ "ID" .Docker.CurrentContainerID | first }}
-{{ $show_footer := or (index $home_container.Labels "traefik-home.show-footer") "false" | parseBool }}
 {{ $show_status_dot := or (index $home_container.Labels "traefik-home.show-status-dot") "true" | parseBool }}
 
 <!DOCTYPE html>
@@ -75,7 +74,7 @@
 <body class="d-flex flex-column min-vh-100 bg-dark">
     <nav class="navbar navbar-fixed-top navbar-dark bg-dark">
         <div class="container">
-            <div class="navbar-header">
+            <div class="navbar-header m-auto">
                 <span class="navbar-brand">
                     Applications
                 </span>
@@ -85,17 +84,11 @@
     <div class="container my-auto pb-4">
         {{/* Display only containers explicitly enabled */}}
         {{ $containers := whereLabelValueMatches $ "traefik.enable" "true" }}
-        <div class="row align-content-center justify-content-evenly">            
+        <div class="row flex-column">            
             {{ range $container := $containers }}        
 
-                {{/* Do not show myself */}}
-                {{ if eq $container.ID $home_container.ID }}
-                    {{continue}}
-                {{ end }}
-
-                {{/* Do not show hidden containers */}}
-                {{ $hide_container := or (index $container.Labels "traefik-home.hide") "false" | parseBool }}   
-                {{ if $hide_container }}
+                {{/* Do not show myself or hidden containers */}}
+                {{ if or (eq $container.ID $home_container.ID) (or (index $container.Labels "traefik-home.hide") "false" | parseBool)  }}
                     {{continue}}
                 {{ end }}
 
@@ -106,87 +99,50 @@
                     {{ if (regexMatch "traefik\\.http\\.routers\\.(.)+\\.rule" $k) }}
                         {{/* I couldn't find a function that finds a group in a regex, so I just remove text before and after the group */}}
                         {{ $service_name = regexReplaceAll "traefik\\.http\\.routers\\." $k "" }}
-                        {{ $service_name = regexReplaceAll "\\.rule" $service_name "" }}
-                        {{break}}
+                        {{ $service_name = regexReplaceAll "\\.rule" (regexFind "(.)+\\.rule$" $service_name) "" }}
+                        
+                        {{/* skip container if service_name was not found */}}
+                        {{ if eq $service_name "" }}
+                            {{continue}}
+                        {{ end }}
+
+                        {{ $host_label := print "traefik.http.routers." $service_name ".rule" }}
+                        {{ $host := index $container.Labels $host_label }}
+                        {{/* Get the first parameter if host contains multiple values */}}
+                        {{ $host := split $host "," | first }}
+                        {{ $host := regexFind "([a-z0-9-]+\\.)+[a-z0-9-]+" $host }}
+        
+                        {{ $entrypoint_label := print "traefik.http.routers." $service_name ".entrypoints" }}
+                        {{ $entrypoint := index $container.Labels $entrypoint_label }}
+                        {{ $protocol := "" }}
+                        {{ if or (eq $entrypoint "websecure") (eq $entrypoint "https") }}
+                            {{ $protocol = "https" }}
+                        {{ else if or (eq $entrypoint "web")  (eq $entrypoint "http") }}
+                            {{ $protocol = "http" }}
+                        {{ else }}
+                            {{/* entrypoint not supported */}}
+                            {{continue}}
+                        {{ end }}
+        
+                        <div class="mt-4 mx-xl-2 w-auto">
+                            <a class="text-decoration-none text-secondary" target="blank" href="{{ print $protocol "://" $host }}">
+                                <div class="row-cols-1 text-center">
+                                    {{/* if icon is set for this docker image then display it, otherwise use a generic icon made up by the first 2 letters */}}
+                                    {{ $name := or (index $container.Labels "traefik-home.alias") $container.Name }}                   
+                                    <div data-name='{{ $service_name }}' class="col mb-3"></div>
+                                    <span class="col text-capitalize">
+                                        {{ if $show_status_dot }}
+                                            <span data-running="{{ $container.State.Running }}" class="me-2"></span>
+                                        {{ end }}
+                                        {{ $name }}
+                                    </span>
+                                </div>
+                            </a>
+                        </div>
                     {{ end }}
                 {{ end }}
-
-                {{/* skip container if service_name was not found */}}
-                {{ if eq $service_name "" }}
-                    {{continue}}
-                {{ end }}
-
-                {{ $host_label := print "traefik.http.routers." $service_name ".rule" }}
-                {{ $host := index $container.Labels $host_label }}
-                {{/* Get the first parameter if host contains multiple values */}}
-                {{ $host := split $host "," | first }}
-                {{ $host := regexFind "([a-z0-9-]+\\.)+[a-z0-9-]+" $host }}
-
-                {{ $entrypoint_label := print "traefik.http.routers." $service_name ".entrypoints" }}
-                {{ $entrypoint := index $container.Labels $entrypoint_label }}
-                {{ $protocol := "" }}
-                {{ if or (eq $entrypoint "websecure") (eq $entrypoint "https") }}
-                    {{ $protocol = "https" }}
-                {{ else if or (eq $entrypoint "web")  (eq $entrypoint "http") }}
-                    {{ $protocol = "http" }}
-                {{ else }}
-                    {{/* entrypoint not supported */}}
-                    {{continue}}
-                {{ end }}
-
-                <div class="col-xl-2 col-lg-3 col-md-4 col-sm-6 col-6 mt-4 mx-xl-2">
-                    <a class="text-decoration-none text-secondary" target="blank" href="{{ print $protocol "://" $host }}">
-                        <div class="row-cols-1 text-center">
-                            {{/* if icon is set for this docker image then display it, otherwise use a generic icon made up by the first 2 letters */}}
-                            {{ $icon := index $container.Labels "traefik-home.icon"}}
-                            {{ $name := or (index $container.Labels "traefik-home.alias") $container.Name }}                   
-                            {{ if $icon }}
-                                <div style="background-image: url({{ $icon }})" class="col mb-3 icon"></div>
-                            {{ else }}
-                                <div data-name='{{ substr 0 2 $name }}' class="col mb-3"></div>
-                            {{ end }}
-                            <span class="col text-capitalize">
-                                {{ if $show_status_dot }}
-                                    <span data-running="{{ $container.State.Running }}" class="me-2"></span>
-                                {{ end }}
-                                {{ $name }}
-                            </span>
-                        </div>
-                    </a>
-                </div>
             {{ end }}
         </div>   
     </div>
-    {{ if $show_footer }}
-        <footer class="border-top d-flex justify-content-center justify-content-xl-end px-xl-5 py-3 bg-white">
-            <ul class="nav">
-                <li class="nav-item">
-                    <span class="nav-link px-2">
-                        <span class="badge bg-secondary position-relative" id="badge-tag">{{ index $home_container.Labels "org.opencontainers.image.version" }}</span>
-                    </span>
-                </li>
-                <li class="nav-item" id="menu-item-new-version"></li>
-                <li class="nav-item">
-                    <a href="https://github.com/santimar/traefik-home" class="nav-link px-2 text-muted">About</a>
-                </li>
-            </ul>
-        </footer>
-        <script>
-            const current_version = "{{ index $home_container.Labels "org.opencontainers.image.version" }}";
-            fetch("https://api.github.com/repos/santimar/traefik-home/releases/latest", {"headers": {"Accept": "application/vnd.github.v3+json"}})
-                .then(response => response.json())
-                .then(response => {
-                    const last_version = response.tag_name;
-                    if (last_version !== current_version) {
-                        console.log("New version available", current_version, "->", last_version);
-                        let badge = document.getElementById("badge-tag");
-                        let menu_item = document.getElementById("menu-item-new-version");
-                        badge.innerHTML += '<span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">!</span>';
-                        menu_item.innerHTML = '<a href="https://github.com/santimar/traefik-home/releases/latest" class="nav-link px-2 text-decoration-underline text-muted">New version available</a>';
-                    }
-                })
-                .catch(error => console.error("There was an error while checking for updates. If this happens regularly, open an issue here: https://github.com/santimar/traefik-home/issues", error));
-        </script>
-    {{ end }}
 </body>
 </html>
