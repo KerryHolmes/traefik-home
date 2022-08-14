@@ -125,7 +125,7 @@
                         {{ end }}
         
                         <div class="mt-4 mx-xl-2 w-auto">
-                            <a class="text-decoration-none text-secondary" target="blank" href="{{ print $protocol "://" $host }}">
+                            <a class="text-decoration-none text-secondary" target="_blank" href="{{ print $protocol "://" $host }}">
                                 <div class="row-cols-1 text-center">
                                     {{/* if icon is set for this docker image then display it, otherwise use a generic icon made up by the first 2 letters */}}
                                     {{ $name := or (index $container.Labels "traefik-home.alias") $container.Name }}                   
